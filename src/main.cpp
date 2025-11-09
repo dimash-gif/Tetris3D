@@ -39,7 +39,7 @@ bool paused = false, gameOver = false;
 int score = 0;
 float lastFall = 0.0f;
 
-// --- NEW: PBR Material System ---
+// --- PBR Material System ---
 struct PBRMaterial {
     string name;
     vec3 albedo;
@@ -75,13 +75,13 @@ int windowHeight = 800;
 
 // ---- Tetromino Shapes ----
 const vector<vector<vec3>> TETROMINOES = {
-    {vec3(0,0,0), vec3(1,0,0), vec3(-1,0,0), vec3(-2,0,0)},
-    {vec3(0,0,0), vec3(-1,0,0), vec3(1,0,0), vec3(1,-1,0)},
-    {vec3(0,0,0), vec3(-1,0,0), vec3(1,0,0), vec3(-1,-1,0)},
-    {vec3(0,0,0), vec3(1,0,0), vec3(-1,0,0), vec3(0,-1,0)},
-    {vec3(0,0,0), vec3(0,-1,0), vec3(-1,-1,0), vec3(1,0,0)},
-    {vec3(0,0,0), vec3(0,-1,0), vec3(1,-1,0), vec3(-1,0,0)},
-    {vec3(0,0,0), vec3(1,0,0), vec3(0,-1,0), vec3(1,-1,0)}
+    {vec3(0,0,0), vec3(1,0,0), vec3(-1,0,0), vec3(-2,0,0)}, // I
+    {vec3(0,0,0), vec3(-1,0,0), vec3(1,0,0), vec3(1,-1,0)}, // L
+    {vec3(0,0,0), vec3(-1,0,0), vec3(1,0,0), vec3(-1,-1,0)},// J
+    {vec3(0,0,0), vec3(1,0,0), vec3(-1,0,0), vec3(0,-1,0)}, // T
+    {vec3(0,0,0), vec3(0,-1,0), vec3(-1,-1,0), vec3(1,0,0)}, // S
+    {vec3(0,0,0), vec3(0,-1,0), vec3(1,-1,0), vec3(-1,0,0)}, // Z
+    {vec3(0,0,0), vec3(1,0,0), vec3(0,-1,0), vec3(1,-1,0)}  // O
 };
 
 // ---- Function Prototypes ----
@@ -169,13 +169,14 @@ int main() {
         glClearColor(0.1f, 0.12f, 0.15f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        vec3 camPos = vec3(camDist * cos(camAngle), camHeight, camDist * sin(camAngle));
+        vec3 camPos = vec3(GRID_W/2.0f + camDist * cos(camAngle), camHeight, GRID_D/2.0f + camDist * sin(camAngle));
         mat4 view = lookAt(camPos, vec3(GRID_W/2.0f, GAME_OVER_HEIGHT/2.0f, GRID_D/2.0f), vec3(0, 1, 0));
         float aspectRatio = (float)windowWidth / (float)windowHeight;
         mat4 proj = perspective(radians(45.0f), aspectRatio, 0.1f, 100.0f);
 
         glUseProgram(cubeShaderProgram);
-        glUniform3fv(glGetUniformLocation(cubeShaderProgram, "viewPos"), 1, value_ptr(camPos));
+        // <-- FIX: The uniform in the fragment shader is "camPos", not "viewPos".
+        glUniform3fv(glGetUniformLocation(cubeShaderProgram, "camPos"), 1, value_ptr(camPos));
 
         drawGrid(view, proj);
         drawLimitPlane(view, proj);
@@ -232,6 +233,7 @@ GLuint compileShader(GLenum type, const char* src) {
 GLuint makeProgram(const string& vertexPath, const string& fragmentPath, bool isCubeShader) {
     string vertexCode = loadShaderFromFile(vertexPath);
     string fragmentCode = loadShaderFromFile(fragmentPath);
+    if (vertexCode.empty() || fragmentCode.empty()) return 0;
     const char* vShaderCode = vertexCode.c_str();
     const char* fShaderCode = fragmentCode.c_str();
 
@@ -260,7 +262,6 @@ void updateScoreDisplay() {
     cout << "\rScore: " << score << "    " << flush;
 }
 
-// --- NEW: Function to change the current piece's material ---
 void applyMaterialToCurrentPiece() {
     const PBRMaterial& newMaterial = materials[currentMaterialIndex];
     for(auto& cube : currentPiece) {
@@ -269,11 +270,9 @@ void applyMaterialToCurrentPiece() {
         cube.roughness = newMaterial.roughness;
     }
     cout << "\nMaterial: " << newMaterial.name << flush;
-    updateScoreDisplay(); // Redraw score after printing material name
+    updateScoreDisplay();
 }
 
-
-// --- MODIFIED: spawnPiece now uses the selected material ---
 void spawnPiece() {
     currentPiece.clear();
     pieceCenter = vec3(floor(GRID_W / 2.0f), GRID_H - 2, floor(GRID_D / 2.0f));
@@ -338,7 +337,6 @@ void mergePiece() {
     }
 }
 
-// (The init functions are unchanged)
 void initGrid() {
     vector<float> gridLines;
     for (int i = 0; i <= GRID_W; ++i) {
@@ -401,17 +399,22 @@ void initCube() {
     glEnableVertexAttribArray(1);
 }
 
-// (The draw functions are unchanged)
 void drawCube(const Cube& cube, const mat4& view, const mat4& proj) {
     glUseProgram(cubeShaderProgram);
     mat4 model = translate(mat4(1.0f), cube.pos * CUBE_SIZE + vec3(0.5f, 0.5f, 0.5f));
+    
+    // <-- FIX: Calculate the normal matrix on the CPU and send it to the shader.
+    mat3 normalMatrix = transpose(inverse(mat3(model)));
+    glUniformMatrix3fv(glGetUniformLocation(cubeShaderProgram, "u_normalMatrix"), 1, GL_FALSE, value_ptr(normalMatrix));
+
     glUniformMatrix4fv(glGetUniformLocation(cubeShaderProgram, "model"), 1, GL_FALSE, value_ptr(model));
     glUniformMatrix4fv(glGetUniformLocation(cubeShaderProgram, "view"), 1, GL_FALSE, value_ptr(view));
     glUniformMatrix4fv(glGetUniformLocation(cubeShaderProgram, "projection"), 1, GL_FALSE, value_ptr(proj));
     glUniform3fv(glGetUniformLocation(cubeShaderProgram, "albedo"), 1, value_ptr(cube.albedo));
     glUniform1f(glGetUniformLocation(cubeShaderProgram, "metallic"), cube.metallic);
     glUniform1f(glGetUniformLocation(cubeShaderProgram, "roughness"), cube.roughness);
-    glUniform1f(glGetUniformLocation(cubeShaderProgram, "ao"), 1.0f);
+    glUniform1f(glGetUniformLocation(cubeShaderProgram, "ao"), 1.0f); // Ambient Occlusion is hardcoded for simplicity
+    
     glBindVertexArray(cubeVAO);
     glDrawArrays(GL_TRIANGLES, 0, 36);
 }
@@ -446,7 +449,6 @@ void framebuffer_size_callback(GLFWwindow*, int width, int height) {
     windowHeight = height;
 }
 
-// --- MODIFIED: key_callback now handles the 'M' key ---
 void key_callback(GLFWwindow* window, int key, int, int action, int) {
     if (action == GLFW_RELEASE) return;
 
@@ -465,10 +467,9 @@ void key_callback(GLFWwindow* window, int key, int, int action, int) {
     if (key == GLFW_KEY_J) camAngle -= 0.05f;
     if (key == GLFW_KEY_L) camAngle += 0.05f;
 
-    // --- NEW: Handle Material Change ---
     if (key == GLFW_KEY_M && action == GLFW_PRESS) {
         currentMaterialIndex = (currentMaterialIndex + 1) % materials.size();
-        if(!gameOver && !paused) {
+        if(!gameOver) {
              applyMaterialToCurrentPiece();
         }
     }

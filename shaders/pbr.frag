@@ -1,22 +1,24 @@
 #version 130
 
-varying vec3 FragPos;
+// INPUT: Variables from the vertex shader
+varying vec3 WorldPos;
 varying vec3 Normal;
 
-// Material properties
+// UNIFORMS: Material properties from C++
 uniform vec3 albedo;
 uniform float metallic;
 uniform float roughness;
 uniform float ao;
 
-// Camera and lights
-uniform vec3 viewPos;
-uniform vec3 lightPositions[4];
-uniform vec3 lightColors[4];
+// UNIFORMS: Lighting and camera info
+#define MAX_LIGHTS 4
+uniform vec3 lightPositions[MAX_LIGHTS];
+uniform vec3 lightColors[MAX_LIGHTS];
+uniform vec3 camPos;
 
 const float PI = 3.14159265359;
 
-// PBR Functions
+// --- PBR Helper Functions ---
 float DistributionGGX(vec3 N, vec3 H, float r) {
     float a = r*r;
     float a2 = a*a;
@@ -25,11 +27,11 @@ float DistributionGGX(vec3 N, vec3 H, float r) {
     float nom   = a2;
     float denom = (NdotH2 * (a2 - 1.0) + 1.0);
     denom = PI * denom * denom;
-    return nom / max(denom, 0.0000001);
+    return nom / denom;
 }
 
 float GeometrySchlickGGX(float NdotV, float r) {
-    float k = (r*r) / 8.0;
+    float k = (r * r) / 8.0;
     float nom   = NdotV;
     float denom = NdotV * (1.0 - k) + k;
     return nom / denom;
@@ -47,32 +49,34 @@ vec3 fresnelSchlick(float cosTheta, vec3 F0) {
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
-void main() {
+void main()
+{
     vec3 N = normalize(Normal);
-    vec3 V = normalize(viewPos - FragPos);
+    vec3 V = normalize(camPos - WorldPos);
 
     vec3 F0 = vec3(0.04);
     F0 = mix(F0, albedo, metallic);
 
     vec3 Lo = vec3(0.0);
-    for(int i = 0; i < 4; ++i) {
-        vec3 L = normalize(lightPositions[i] - FragPos);
+    for(int i = 0; i < MAX_LIGHTS; ++i)
+    {
+        vec3 L = normalize(lightPositions[i] - WorldPos);
         vec3 H = normalize(V + L);
-        float distance = length(lightPositions[i] - FragPos);
+        float distance = length(lightPositions[i] - WorldPos);
         float attenuation = 1.0 / (distance * distance);
         vec3 radiance = lightColors[i] * attenuation;
 
         float NDF = DistributionGGX(N, H, roughness);
-        float G = GeometrySmith(N, V, L, roughness);
-        vec3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
-
-        vec3 numerator = NDF * G * F;
-        float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.001;
-        vec3 specular = numerator / denominator;
+        float G   = GeometrySmith(N, V, L, roughness);
+        vec3  F   = fresnelSchlick(max(dot(H, V), 0.0), F0);
 
         vec3 kS = F;
         vec3 kD = vec3(1.0) - kS;
         kD *= 1.0 - metallic;
+
+        vec3 numerator    = NDF * G * F;
+        float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.001;
+        vec3 specular     = numerator / denominator;
 
         float NdotL = max(dot(N, L), 0.0);
         Lo += (kD * albedo / PI + specular) * radiance * NdotL;
